@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ITインフラ問題 一覧</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="common.js"></script>
+<script src="questions-meta.js"></script>
+<script src="questions-content.js"></script>
+<style>
+  body { font-family: Arial, "Meiryo", sans-serif; padding: 15px; max-width: 1000px; margin: 0 auto; color: #222; }
+  h1 { font-size: 20px; border-left: 6px solid #2b6cb0; padding-left: 10px; }
+  h2 { font-size: 15px; margin-top: 28px; }
+  .box { border: 1px solid #ccc; border-radius: 4px; padding: 14px; margin-bottom: 16px; background: #fafafa; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  input[type=text] { padding: 8px; font-size: 14px; width: 240px; border: 1px solid #bbb; border-radius: 4px; }
+  button { padding: 9px 16px; font-size: 14px; border: 1px solid #2b6cb0; background: #2b6cb0; color: #fff; border-radius: 4px; cursor: pointer; }
+  button.secondary { background: #fff; color: #2b6cb0; }
+  button.secondary.active { background: #2b6cb0; color: #fff; }
+  button.category-btn { transition: background .15s, color .15s; }
+  button.danger { background: #fff; color: #c53030; border-color: #c53030; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 6px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+  th { background: #eef3f9; position: sticky; top: 0; }
+  tr.group-row td { background: #e2e8f0; font-weight: bold; }
+  .status-done { color: #2f855a; font-weight: bold; }
+  .status-none { color: #999; }
+  .note { font-size: 12px; color: #666; }
+  #userNameMsg { font-size: 12px; color: #c53030; }
+  .sticky-actions { position: sticky; bottom: 0; background: #fff; padding: 10px 0; border-top: 1px solid #ddd; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>ITインフラ問題集（全70問）</h1>
+
+<div class="box" id="s3StatusBox" style="display:none; background:#f0fff4; border-color:#38a169;">
+  <span id="s3StatusText"></span>
+</div>
+
+<div class="box">
+  <div class="row">
+    <label for="userName"><b>実施者名：</b></label>
+    <input type="text" id="userName" placeholder="氏名を入力してください">
+    <span id="userNameMsg"></span>
+  </div>
+  <div class="note">入力した氏名は、この後に実施する問題の結果に自動的に記録されます（スペースは自動的に除去されます）。</div>
+  <div class="row" id="s3RequestRow" style="display:none; margin-top:8px;">
+    <button onclick="onRequestS3Access()">アクセスをリクエスト（初回のみ）</button>
+    <span class="note" id="s3RequestMsg"></span>
+  </div>
+</div>
+
+<div class="box" id="resumeBox" style="display:none; border-color:#d69e2e; background:#fffaf0;">
+  <div class="row">
+    <span id="resumeInfo"></span>
+    <button onclick="resumeQueue()">続きから再開する</button>
+    <button class="secondary" onclick="discardQueue()">破棄して選び直す</button>
+  </div>
+</div>
+
+<div class="box">
+  <div class="row">
+    <button onclick="selectAll(true)">全選択</button>
+    <button class="secondary" onclick="selectAll(false)">全解除</button>
+    <span class="note">｜カテゴリごとに選択：</span>
+    <span id="categoryButtons"></span>
+  </div>
+  <div class="row">
+    <span class="note">個別に選択したい場合は、表のチェックボックスを直接クリックしてください。</span>
+  </div>
+</div>
+
+<div class="box">
+  <h2 style="margin-top:0;">問題一覧</h2>
+  <table id="qTable">
+    <thead>
+      <tr>
+        <th style="width:32px;"></th>
+        <th style="width:60px;">問題番号</th>
+        <th style="width:120px;">カテゴリ</th>
+        <th>タイトル</th>
+        <th style="width:90px;">種別</th>
+        <th style="width:110px;">状態（この端末）</th>
+      </tr>
+    </thead>
+    <tbody id="qTableBody"></tbody>
+  </table>
+  <div class="sticky-actions row" style="justify-content: space-between;">
+    <div class="row" style="margin-bottom:0;">
+      <button onclick="startSelected()">選択した問題を開始する</button>
+      <span id="selectedCount" class="note"></span>
+    </div>
+    <button onclick="window.scrollTo({top: 0, behavior: 'smooth'})"
+            style="width:auto; padding:8px 16px; background:#fff; color:#2b6cb0; border:2px solid #2b6cb0; font-weight:bold;">
+      ▲ トップへ戻る
+    </button>
+  </div>
+</div>
+
+<div class="box">
+  <h2 style="margin-top:0;">自動保存の設定（任意）</h2>
+  <div class="note">有効にすると、問題を1問終えるたびに手動操作なしでCSVファイルが1件ずつ書き出されます。
+  Excelの「データ取得 → フォルダから」（Power Query）でそのフォルダを参照すれば、複数人・複数PC分の結果をまとめて自動転記できます。
+  </div>
+  <div class="row" style="margin-top:8px;">
+    <button onclick="onEnableFolderAutoSave()">フォルダを選択して自動保存（Chrome/Edge推奨）</button>
+    <button class="secondary" onclick="onEnableDownloadAutoSave()">完了ごとに自動ダウンロード（全ブラウザ対応）</button>
+    <button class="danger" onclick="onDisableAutoSave()">自動保存をオフにする</button>
+  </div>
+  <div class="row">
+    <span id="autoSaveStatus" class="note"></span>
+    <button id="reauthBtn" class="secondary" style="display:none;" onclick="onReauth()">フォルダへのアクセスを許可し直す</button>
+  </div>
+</div>
+
+<div class="box">
+  <h2 style="margin-top:0;">結果一覧（この端末に保存された実施結果）</h2>
+  <div class="row">
+    <button onclick="exportResultsToExcel()">Excelファイルとして出力</button>
+    <span class="note">この端末に保存されている結果のみが対象です（Excel形式・.xlsx）。</span>
+  </div>
+  <table id="resultTable">
+    <thead>
+      <tr>
+        <th>問題番号</th><th>カテゴリ</th><th>タイトル</th><th>スコア</th><th>実施者</th><th>実施日時</th><th>手順書を開いたか</th>
+      </tr>
+    </thead>
+    <tbody id="resultTableBody"></tbody>
+  </table>
+  <div class="note" id="noResultsMsg">まだ実施結果がありません。</div>
+</div>
+
+<script>
+/* ---- 氏名の初期表示・保存 ---- */
+var nameInput = document.getElementById('userName');
+nameInput.value = getUserName();
+nameInput.addEventListener('input', function () { setUserName(nameInput.value); refreshS3Status(); });
+nameInput.addEventListener('blur', function () {
+  var normalized = normalizeName(nameInput.value);
+  nameInput.value = normalized;
+  setUserName(normalized);
+  refreshS3Status();
+});
+
+/* ---- カテゴリ別ボタンの生成（クリックでそのカテゴリを選択、もう一度で解除。選択中は色が変わる） ---- */
+var categoryBtnWrap = document.getElementById('categoryButtons');
+CATEGORY_ORDER.forEach(function (c) {
+  var btn = document.createElement('button');
+  btn.className = 'secondary category-btn';
+  btn.style.marginRight = '4px';
+  btn.textContent = c;
+  btn.setAttribute('data-category', c);
+  btn.onclick = function () { onCategoryButtonClick(c); };
+  categoryBtnWrap.appendChild(btn);
+});
+
+/* ---- 問題テーブルの生成（カテゴリごとにグループ化） ---- */
+var tbody = document.getElementById('qTableBody');
+
+function renderTable() {
+  tbody.innerHTML = '';
+  var results = getResults();
+  CATEGORY_ORDER.forEach(function (category) {
+    var items = getAllQuestionsData().filter(function (q) { return q.category === category; });
+    if (items.length === 0) return;
+
+    var groupTr = document.createElement('tr');
+    groupTr.className = 'group-row';
+    groupTr.innerHTML =
+      '<td><input type="checkbox" class="groupCheck" data-category="' + category + '" onclick="toggleGroup(this)"></td>' +
+      '<td colspan="4">' + category + '（' + items.length + '問）</td>';
+    tbody.appendChild(groupTr);
+
+    items.forEach(function (q) {
+      var latest = null;
+      results.forEach(function (r) { if (r.qid === q.id) latest = r; });
+      var statusHtml = latest
+        ? '<span class="status-done">' + latest.score + '/' + latest.maxScore + '（' + latest.name + '）</span>'
+        : '<span class="status-none">未実施</span>';
+      var titleText = q.title || '（未設定）';
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><input type="checkbox" class="qCheck" data-id="' + q.id + '" data-category="' + category + '" onchange="updateSelectedCount()"></td>' +
+        '<td>' + q.id + '</td>' +
+        '<td>' + q.category + '</td>' +
+        '<td>' + titleText + '</td>' +
+        '<td>' + (q.shubetsu || '') + '</td>' +
+        '<td>' + statusHtml + '</td>';
+      tbody.appendChild(tr);
+    });
+  });
+  updateSelectedCount();
+}
+
+function selectAll(checked) {
+  document.querySelectorAll('.qCheck').forEach(function (c) { c.checked = checked; });
+  document.querySelectorAll('.groupCheck').forEach(function (c) { c.checked = checked; });
+  updateSelectedCount();
+}
+
+/** カテゴリボタンのクリック：そのカテゴリが全問選択済みなら解除、そうでなければ全選択する（トグル動作） */
+function onCategoryButtonClick(category) {
+  var items = document.querySelectorAll('.qCheck[data-category="' + category + '"]');
+  var allChecked = items.length > 0 && Array.from(items).every(function (c) { return c.checked; });
+  items.forEach(function (c) { c.checked = !allChecked; });
+  var g = document.querySelector('.groupCheck[data-category="' + category + '"]');
+  if (g) g.checked = !allChecked;
+  updateSelectedCount();
+}
+
+function toggleGroup(el) {
+  var category = el.getAttribute('data-category');
+  document.querySelectorAll('.qCheck[data-category="' + category + '"]').forEach(function (c) { c.checked = el.checked; });
+  updateSelectedCount();
+}
+
+/** 各カテゴリが「全問選択済みかどうか」を毎回判定し、ボタンの色（active）を同期する */
+function refreshCategoryButtonStates() {
+  document.querySelectorAll('.category-btn').forEach(function (btn) {
+    var category = btn.getAttribute('data-category');
+    var items = document.querySelectorAll('.qCheck[data-category="' + category + '"]');
+    var allChecked = items.length > 0 && Array.from(items).every(function (c) { return c.checked; });
+    btn.classList.toggle('active', allChecked);
+  });
+}
+
+function updateSelectedCount() {
+  var n = document.querySelectorAll('.qCheck:checked').length;
+  document.getElementById('selectedCount').textContent = n + ' 問を選択中';
+  refreshCategoryButtonStates();
+}
+
+/* ---- テスト開始（複数選択時は連続出題キューを設定） ----
+   キューには選択した問題番号を「現在実施中のものを含めて」すべて保存する。
+   ブラウザを閉じても localStorage に残るため、後で「続きから再開」できる。
+*/
+function startSelected() {
+  var name = getUserName();
+  if (!name) {
+    document.getElementById('userNameMsg').textContent = '※実施者名を入力してください';
+    nameInput.focus();
+    return;
+  }
+  document.getElementById('userNameMsg').textContent = '';
+
+  var ids = Array.from(document.querySelectorAll('.qCheck:checked'))
+    .map(function (c) { return Number(c.getAttribute('data-id')); })
+    .sort(function (a, b) { return a - b; });
+
+  if (ids.length === 0) {
+    alert('問題を1問以上選択してください。');
+    return;
+  }
+
+  setQueue(ids);
+  window.location.href = 'exam.html';
+}
+
+/* ---- 続きから再開／破棄 ---- */
+function checkResumeBanner() {
+  var q = getQueue();
+  var box = document.getElementById('resumeBox');
+  if (q.length > 0) {
+    box.style.display = 'block';
+    document.getElementById('resumeInfo').textContent = '前回途中で終了したテストがあります（残り' + q.length + '問）。';
+  } else {
+    box.style.display = 'none';
+  }
+}
+function resumeQueue() {
+  var q = getQueue();
+  if (q.length === 0) return;
+  window.location.href = 'exam.html';
+}
+function discardQueue() {
+  if (confirm('残りの出題予定を破棄します。よろしいですか？')) {
+    clearQueue();
+    checkResumeBanner();
+  }
+}
+
+/* ---- 自動保存の設定 ---- */
+async function refreshAutoSaveStatus() {
+  var mode = getAutoSaveMode();
+  var statusEl = document.getElementById('autoSaveStatus');
+  var reauthBtn = document.getElementById('reauthBtn');
+  reauthBtn.style.display = 'none';
+
+  if (mode === 'off') {
+    statusEl.textContent = '現在の設定：自動保存オフ（一覧からの手動Excel出力のみ）';
+  } else if (mode === 'download') {
+    statusEl.textContent = '現在の設定：完了ごとに自動ダウンロード（ブラウザの既定のダウンロード先フォルダに保存されます）';
+  } else if (mode === 'fs') {
+    var st = await getAutoSaveFolderStatus();
+    if (!st.name) {
+      statusEl.textContent = '現在の設定：フォルダ自動保存（フォルダ未選択）';
+    } else {
+      statusEl.textContent = '現在の設定：フォルダ「' + st.name + '」へ自動保存 - アクセス許可：' + st.permission;
+      if (st.permission !== 'granted') reauthBtn.style.display = 'inline-block';
+    }
+  }
+}
+
+async function onEnableFolderAutoSave() {
+  var handle = await enableFolderAutoSave();
+  if (handle) alert('自動保存先フォルダを設定しました：' + handle.name + '\n以後、問題を1問終えるたびに自動でCSVが書き込まれます。');
+  refreshAutoSaveStatus();
+}
+function onEnableDownloadAutoSave() {
+  enableDownloadAutoSave();
+  alert('「完了ごとに自動ダウンロード」を有効にしました。ブラウザの既定のダウンロード先フォルダに1問ごとCSVが保存されます。');
+  refreshAutoSaveStatus();
+}
+function onDisableAutoSave() {
+  disableAutoSave();
+  refreshAutoSaveStatus();
+}
+async function onReauth() {
+  var handle = await idbGet('autoSaveDirHandle');
+  var ok = await ensureFolderPermission(handle);
+  if (ok) alert('アクセス許可を再取得しました。'); else alert('許可されませんでした。フォルダを選び直してください。');
+  refreshAutoSaveStatus();
+}
+
+/* ---- 結果一覧の表示 ---- */
+function renderResults() {
+  var results = getResults();
+  var tb = document.getElementById('resultTableBody');
+  tb.innerHTML = '';
+  results.forEach(function (r) {
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + r.qid + '</td><td>' + r.category + '</td><td>' + r.title + '</td>' +
+      '<td>' + r.score + '/' + r.maxScore + '</td><td>' + r.name + '</td>' +
+      '<td>' + r.timestamp + '</td><td>' + r.manualUsed + '</td>';
+    tb.appendChild(tr);
+  });
+  document.getElementById('noResultsMsg').style.display = results.length ? 'none' : 'block';
+}
+
+function refreshS3Status() {
+  var box = document.getElementById('s3StatusBox');
+  var text = document.getElementById('s3StatusText');
+  var reqRow = document.getElementById('s3RequestRow');
+  if (hasS3Config()) {
+    box.style.display = 'block';
+    text.textContent = 'S3連携：有効（実施者「' + (getUserName() || '未入力') + '」の結果はS3にも自動保存されます）';
+    reqRow.style.display = 'none';
+  } else {
+    box.style.display = 'none';
+    // S3連携（Lambda）が構成されていて、まだアクセス未取得の場合のみリクエスト欄を表示する
+    reqRow.style.display = S3_ACCESS_REQUEST_URL ? 'flex' : 'none';
+  }
+}
+
+/* ---- アクセスリクエスト（実施者名を入力。スペースは自動除去して識別子にする） ---- */
+async function onRequestS3Access() {
+  var msg = document.getElementById('s3RequestMsg');
+  var normalized = normalizeName(nameInput.value);
+
+  if (!normalized) {
+    msg.textContent = '実施者名を入力してください。';
+    return;
+  }
+
+  nameInput.value = normalized; // 正規化後（スペース除去済み）の値を画面にも反映
+  setUserName(normalized);
+  msg.textContent = 'リクエスト中…';
+  var result = await requestS3Access(normalized, normalized);
+  if (result.ok) {
+    msg.textContent = '';
+    refreshS3Status();
+  } else {
+    msg.textContent = 'リクエストに失敗しました：' + result.error;
+  }
+}
+
+renderTable();
+renderResults();
+checkResumeBanner();
+refreshAutoSaveStatus();
+refreshS3Status();
+
+var lastQid = localStorage.getItem("infraTest_lastQid");
+if (lastQid) {
+  var row = document.querySelector('.qCheck[data-id="' + lastQid + '"]')?.closest('tr');
+  if (row) {
+    row.scrollIntoView({ block: "center" });
+    setTimeout(function () { row.style.background = ""; }, 2000);
+  }
+  localStorage.removeItem("infraTest_lastQid");
+}
+</script>
+
+</body>
+</html>
