@@ -23,7 +23,7 @@ provider "aws" {
 
 locals {
   common_js = templatefile(
-    "${path.module}/templates/common.js.tftpl",
+    "${path.module}/template/common.js.tftpl",
     {
       lambda_function_url = aws_lambda_function_url.issue_url.function_url
     }
