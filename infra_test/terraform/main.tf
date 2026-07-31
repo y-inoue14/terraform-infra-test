@@ -34,7 +34,7 @@ resource "local_file" "common_js" {
   filename = "${path.module}/static/common.js"
 
   content = templatefile(
-    "${path.module}/templates/common.js.tftpl",
+    "${path.module}/template/common.js.tftpl",
     {
       lambda_function_url = aws_lambda_function_url.issue_url.function_url
     }
